@@ -7,3 +7,10 @@ title: 'First Post'
 Testing first post.
 
 测试文章。
+
+```
+public interface IEntity
+{
+	Dictionary<Type, IComponent> Components { get; }
+}
+```
