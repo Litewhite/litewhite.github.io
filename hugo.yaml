@@ -1,4 +1,4 @@
-baseURL: https://example.org/
+baseURL: https://litewhite.github.io/
 locale: zh-cn
-title: My New Hugo Project
+title: Litewhite's Dev Log
 theme: ["PaperMod"]
