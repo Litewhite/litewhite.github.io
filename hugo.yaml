@@ -13,3 +13,18 @@ markup:
     guessSyntax: true
     lineNos: true
     style: "dracula"
+taxonomies:
+  tag: tags
+  category: categories
+  series: series
+menu:
+  main:
+    - name: Posts
+      url: /posts/
+      weight: 10
+    - name: Tags
+      url: /tags/
+      weight: 20
+    - name: About  # <--- 添加这一段
+      url: /about/
+      weight: 30

@@ -1,0 +1,7 @@
+{{ $img := .Page.Resources.GetMatch .Destination }}
+{{ if $img }}
+  {{ $webp := $img.Process "webp" }}
+  <img src="{{ $webp.RelPermalink }}" alt="{{ .Text }}" />
+{{ else }}
+  <img src="{{ .Destination | safeURL }}" alt="{{ .Text }}" />
+{{ end }}
