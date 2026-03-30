@@ -2,3 +2,14 @@ baseURL: https://litewhite.github.io/
 locale: zh-cn
 title: Litewhite's Dev Log
 theme: ["PaperMod"]
+params:
+  ShowCodeCopyButtons: true
+  assets:
+    disableHLJS: true
+markup:
+  highlight:
+    noClasses: true
+    codeFences: true
+    guessSyntax: true
+    lineNos: true
+    style: "dracula"

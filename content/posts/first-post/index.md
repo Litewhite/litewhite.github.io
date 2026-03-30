@@ -8,9 +8,11 @@ Testing first post.
 
 测试文章。
 
-```
+```csharp
 public interface IEntity
 {
 	Dictionary<Type, IComponent> Components { get; }
 }
 ```
+
+![testpic](pic0.png)
