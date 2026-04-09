@@ -25,6 +25,6 @@ menu:
     - name: Tags
       url: /tags/
       weight: 20
-    - name: About  # <--- 添加这一段
+    - name: About
       url: /about/
       weight: 30

@@ -1,7 +1,40 @@
-{{ $img := .Page.Resources.GetMatch .Destination }}
-{{ if $img }}
-  {{ $webp := $img.Process "webp" }}
-  <img src="{{ $webp.RelPermalink }}" alt="{{ .Text }}" />
-{{ else }}
-  <img src="{{ .Destination | safeURL }}" alt="{{ .Text }}" />
-{{ end }}
+{{- /* 1. 解析 URL */ -}}
+{{- $url := urls.Parse .Destination -}}
+{{- $path := $url.Path -}}
+{{- $fragment := $url.Fragment -}}
+
+{{- /* 2. 初始化宽度 */ -}}
+{{- $w := "" -}}
+
+{{- /* 3. 严格匹配 width=数字 的格式 */ -}}
+{{- if $fragment -}}
+  {{- /* 寻找 width= 后面跟着的数字或百分比 */ -}}
+  {{- $match := findRE `width=([0-9]+(px|%)?)` $fragment | first 1 -}}
+  {{- if $match -}}
+    {{- /* 替换掉 "width=" 前缀，只拿数值部分 */ -}}
+    {{- $val := replace (index $match 0) "width=" "" -}}
+    
+    {{- /* 补全单位逻辑 */ -}}
+    {{- if (findRE `^[0-9]+$` $val) -}}
+      {{- $w = printf "%spx" $val -}}
+    {{- else -}}
+      {{- $w = $val -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+
+{{- /* 4. 图片处理逻辑 */ -}}
+{{- $img := .Page.Resources.GetMatch $path -}}
+{{- $src := "" -}}
+{{- if $img -}}
+  {{- $webp := $img.Process "webp" -}}
+  {{- $src = $webp.RelPermalink -}}
+{{- else -}}
+  {{- $src = $path | safeURL -}}
+{{- end -}}
+
+{{- /* 5. 渲染输出 */ -}}
+<img src="{{ $src }}" 
+     alt="{{ .Text }}" 
+     {{ if $w }}style="width: {{ $w }}; height: auto; max-width: 100%;"{{ end }}
+     loading="lazy" />
