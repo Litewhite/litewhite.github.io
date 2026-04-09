@@ -5,23 +5,30 @@ title: 'Simple ECS in Godot C#'
 tags: ["Godot", "C#"]
 ---
 
-## Why Entity Component System ?
+## ECS and Simple ECS
 
-As we known, Entity Component System (ECS) is widely used in game dev, like Unity's C# script system, or Unreal's Actor-Component structure.
-ECS is well-known for its flexibility, building a single entity with several pre-made components.
+ECS stands for Entity-Component-System. Entity contains several components and related system logics. Component is pure data, like velocity, status and so on. System is about pure logic, it is a bunch of status-less functions.
 
-For a simple example, you wanna make a cat entity. Just pickup these common components: model_comp (handle model and material display), animation_comp (handle cat's animation), sound_comp (handle meow~), ai_comp (decide where to walk to and what cat's doing). And finally, you set up cat's data into these components, like cat's model resource path, cat's sound path, the ai behave tree path and animation state machine path.
+For high performance project, component's pure data and system's pure logic feature is important, which helps reduce CPU cache missing and provide cleaner code structure.
+
+However, in some cases, I choose to mix some component (data) and some system (logic) into one single macro component. For example, I've got one macro component called `MovementComponent`, which contains `moveSpeed`, `jumpSpeed`, `movementStatus` data, as well as `ExecuteMove()`, `ExecuteJump()` logic.
+
+Let's say it is Simple ECS, or Component-Based-Design if you like. And starting from here, I use "component" stands for "macro component".
+
+## Why Simple ECS ?
+
+For example, you wanna make a cat entity. Just pickup these common components: model_comp (handle model and material display), animation_comp (handle cat's animation), sound_comp (handle meow~), ai_comp (decide where to walk to and what cat's doing). And finally, you set up cat's data into these components, like cat's model resource path, cat's sound path, the ai behave tree path and animation state machine path.
 
 In this example, all of the components is pre-made and well-designed. So it is easy to make a cat entity. Just put components together and inject some cat's proprietary config data.
 
-Based on ECS, you can make a specific entity at run-time, even this entity is not pre-defined in source code. I mean, if you input the name of needed components and input config data (like a recipe), then the system will just make it for you. This can be called as a class factory design.
+Based on simple ECS, you can make a specific entity at run-time, even this entity is not pre-defined in source code. I mean, if you input the name of needed components and input config data (like a recipe), then the system will just make it for you. This can be called as a class factory design.
 
-The re-usable components and run-time flexibility are solid reasons why I love ECS.
-
+With "macro component", the code reusable flexibility still remains. But performace boost and extreme clean structure from pure ECS design are the cost. 
+This is a much simple way for code management, I think.
 
 ## ECS for Godot C#
 
-Godot has node system, and one single node can only be attached by one single script. So it is easy to find out that one node stands for one component. This is my player scene sctructure:
+Godot has node system, and one single node can only be attached by one single script. So it is easy to find out that one node stands for one component. This is my player scene structure:
 
 ![](pic0.png#width=400)
 
