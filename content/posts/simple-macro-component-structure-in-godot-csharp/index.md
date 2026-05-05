@@ -1,6 +1,6 @@
 ---
 date: '2026-04-08'
-draft: false
+draft: true
 title: 'Simple Macro-Component-Structure in Godot C#'
 tags: ["Godot", "C#"]
 ---
