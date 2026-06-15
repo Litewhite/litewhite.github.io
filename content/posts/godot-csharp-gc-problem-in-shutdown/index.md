@@ -1,5 +1,5 @@
 ---
-date: '2026-06-25'
+date: '2026-06-15T14:00:40+08:00'
 draft: false
 title: 'Godot C# GC Problem In Shutdown'
 tags: ["Godot", "C#"]
@@ -20,8 +20,7 @@ _FORCE_INLINE_ ~List() {
 
 This problem is occured on `Windows11` at `Godot 4.6.3 dotnet`. And in my case, I found the `List` is actually a container of `CSharpScript`, which is not freed at this point. So I record the callstack of ref&unref in `RefCounted` and found this below.
 
-<details>
-  <summary>At `DEV_ASSERT(_first == nullptr);`,  let's check the List's first element's ref&unref records: </summary>
+At `DEV_ASSERT(_first == nullptr);`,  let's check the List's first element's ref&unref records:
 
 ```
 -		_self	0x00000220db3a54b0 {type_info={class_name=U"AudioRay" native_base_name={_data=0x000002208c658f08 {...} } ...} ...}	CSharpScript *
@@ -110,14 +109,13 @@ This problem is occured on `Windows11` at `Godot 4.6.3 dotnet`. And in my case, 
 		count	8	unsigned int
 +		[Raw View]	{write={...} _cowdata={_ptr=0x00000240d7a66838 {frames=... count=8 } } }	Vector<RefCounted::DebugFrame>
 ```
-</details>
 
 Check the `debug_ref_frames` and `debug_unref_frames`, both of them are 44 length. This indicated me that the CSharpScript need one more unref to be freed. ( Because the init refcount of RefCounted is 1 ).
 
 So who is holding the referrence? Now check the case when this problem is not occuring:
 I choose this code path to set breakpoint when this CSharpScript's name is `AudioRay` (same as the last case): `CSharpScript::~CSharpScript() Line 2806`
-<details>
-  <summary>At `CSharpScript::~CSharpScript()`,  let's check the CSharpScript's ref&unref records: </summary>
+
+At `CSharpScript::~CSharpScript()`,  let's check the CSharpScript's ref&unref records:
 
 ```
 -		Script	{...}	Script
@@ -169,11 +167,10 @@ I choose this code path to set breakpoint when this CSharpScript's name is `Audi
 		[7]	0x00007ff6d24345c8 {godot.windows.editor.dev.x86_64.mono.exe!memdelete<ArrayPrivate>(ArrayPrivate * p_class), Line 152}	const void *
 		count	8	unsigned int
 ```
-</details>
 
 I found the `debug_unref_frames[44]` is the key, it is the last reference owner of this CSharpScript.
-<details>
-  <summary>At `CSharpScript::~CSharpScript()`,  let's check call stacks: </summary>
+
+At `CSharpScript::~CSharpScript()`,  let's check call stacks:
 
 ```
  	godot.windows.editor.dev.x86_64.mono.exe!CSharpScript::~CSharpScript() Line 2806	C++
@@ -199,7 +196,6 @@ I found the `debug_unref_frames[44]` is the key, it is the last reference owner 
  	[External Code]	
  	godot.windows.editor.dev.x86_64.mono.exe!ShimMainCRTStartup(...) Line 74	C
 ```
-</details>
 
 Well, `CSharpLanguage::finalize() Line 144` tells that it comes from here:
 ```
@@ -226,8 +222,7 @@ Took a look into `OnGodotShuttingDownImpl` and after some API searching, I think
 - Step4: dotnet Finalizer thread finally call Step1 objects' finalizer
 
 So I modified `OnGodotShuttingDownImpl`, manually trigger GC and wait for all finalizer finished at the end of the function, and after that, this problem is not shown yet. (I've tested for about 10 times)
-<details>
-  <summary>My fix</summary>
+
 
 ```csharp
 private static void OnGodotShuttingDownImpl()
@@ -272,8 +267,6 @@ private static void OnGodotShuttingDownImpl()
     // MY FIX END
 }
 ```
-</details>
-
 
 BTW, by mixed debugging and many testing, I also found that the owner of last one reference is a TypedArray: its `_p->typed.script` is exactly the same address.
 ```
