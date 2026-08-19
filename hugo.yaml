@@ -1,8 +1,10 @@
 baseURL: https://litewhite.github.io/
 locale: zh-cn
+defaultContentLanguage: "zh"
 title: Litewhite's Dev Log
 theme: ["PaperMod"]
 params:
+  displayFullLangName: true
   ShowCodeCopyButtons: true
   assets:
     disableHLJS: true
@@ -28,3 +30,8 @@ menu:
     - name: About
       url: /about/
       weight: 30
+languages:
+  zh:
+    languageName: "中文"
+  en:
+    languageName: "English"

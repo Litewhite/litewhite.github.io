@@ -1,13 +1,13 @@
 ---
 date: '2026-06-15T14:00:40+08:00'
 draft: false
-title: 'Godot C# GC Problem In Shutdown'
+title: 'Godot C# 在 Shutdown 时的 GC 问题'
 tags: ["Godot", "C#"]
 ---
 
-## The Problem
+## 问题描述
 
-When closing game window, there is a certian possibility that cause memory leaking issue here:
+关闭游戏窗口时，有一定概率在此处触发内存泄漏问题：
 
 ```cpp
 _FORCE_INLINE_ ~List() {
@@ -16,11 +16,11 @@ _FORCE_INLINE_ ~List() {
 }
 ```
 
-## Insight
+## 深入调查
 
-This problem is occured on `Windows11` at `Godot 4.6.3 dotnet`. And in my case, I found the `List` is actually a container of `CSharpScript`, which is not freed at this point. So I record the callstack of ref&unref in `RefCounted` and found this below.
+该问题出现在 `Windows11` 上的 `Godot 4.6.3 dotnet`。就我的情况而言，我发现这个 `List` 实际上是 `CSharpScript` 的容器，而 `CSharpScript` 在该时点尚未被释放。于是我在 `RefCounted` 中记录了 ref / unref 的调用栈，得到如下结果。
 
-At `DEV_ASSERT(_first == nullptr);`,  let's check the List's first element's ref&unref records:
+在 `DEV_ASSERT(_first == nullptr);` 处，检查该 `List` 第一个元素的 ref & unref 记录：
 
 ```
 -		_self	0x00000220db3a54b0 {type_info={class_name=U"AudioRay" native_base_name={_data=0x000002208c658f08 {...} } ...} ...}	CSharpScript *
@@ -110,12 +110,12 @@ At `DEV_ASSERT(_first == nullptr);`,  let's check the List's first element's ref
 +		[Raw View]	{write={...} _cowdata={_ptr=0x00000240d7a66838 {frames=... count=8 } } }	Vector<RefCounted::DebugFrame>
 ```
 
-Check the `debug_ref_frames` and `debug_unref_frames`, both of them are 44 length. This indicated me that the CSharpScript need one more unref to be freed. ( Because the init refcount of RefCounted is 1 ).
+对照 `debug_ref_frames` 和 `debug_unref_frames`，两者的长度都是 44。这提示我：这个 `CSharpScript` 还需要一次 unref 才能被释放（因为 `RefCounted` 的初始 refcount 是 1）。
 
-So who is holding the referrence? Now check the case when this problem is not occuring:
-I choose this code path to set breakpoint when this CSharpScript's name is `AudioRay` (same as the last case): `CSharpScript::~CSharpScript() Line 2806`
+那么到底是谁还持有这个引用？接下来检查问题未发生的情况：
+我选择了这条代码路径来设置断点，条件是当这个 `CSharpScript` 的名字是 `AudioRay` 时（与上一个案例相同）：`CSharpScript::~CSharpScript() Line 2806`
 
-At `CSharpScript::~CSharpScript()`,  let's check the CSharpScript's ref&unref records:
+在 `CSharpScript::~CSharpScript()` 处，检查该 `CSharpScript` 的 ref & unref 记录：
 
 ```
 -		Script	{...}	Script
@@ -168,9 +168,9 @@ At `CSharpScript::~CSharpScript()`,  let's check the CSharpScript's ref&unref re
 		count	8	unsigned int
 ```
 
-I found the `debug_unref_frames[44]` is the key, it is the last reference owner of this CSharpScript.
+我发现了关键点 `debug_unref_frames[44]`，它就是该 `CSharpScript` 的最后一个引用持有者。
 
-At `CSharpScript::~CSharpScript()`,  let's check call stacks:
+在 `CSharpScript::~CSharpScript()` 处，检查调用栈：
 
 ```
  	godot.windows.editor.dev.x86_64.mono.exe!CSharpScript::~CSharpScript() Line 2806	C++
@@ -197,32 +197,32 @@ At `CSharpScript::~CSharpScript()`,  let's check call stacks:
  	godot.windows.editor.dev.x86_64.mono.exe!ShimMainCRTStartup(...) Line 74	C
 ```
 
-Well, `CSharpLanguage::finalize() Line 144` tells that it comes from here:
-```
+OK，`CSharpLanguage::finalize() Line 144` 表明它来自这里：
+
+```cpp
 void CSharpLanguage::finalize() {
 	if (finalized) {
 		return;
 	}
 
 	if (gdmono && gdmono->is_runtime_initialized() && GDMonoCache::godot_api_cache_updated) {
-		GDMonoCache::managed_callbacks.DisposablesTracker_OnGodotShuttingDown();   // <= here!!!
+		GDMonoCache::managed_callbacks.DisposablesTracker_OnGodotShuttingDown();   // <- here!!!
 	}
 ......
 }
 ```
 
-Found relative c# code in `godot\modules\mono\glue\GodotSharp\GodotSharp\Core\DisposablesTracker.cs`, and `OnGodotShuttingDownImpl` this function seems manually calling `Dispose()` to finally unref the CSharpScirpt.
+在 `godot\modules\mono\glue\GodotSharp\GodotSharp\Core\DisposablesTracker.cs` 中找到了对应的 C# 代码，其中的 `OnGodotShuttingDownImpl` 函数似乎是手动调用 `Dispose()` 来最终 unref 这些 `CSharpScript` 的。
 
-## Analyze and Fix
+## 分析与修复
 
-Took a look into `OnGodotShuttingDownImpl` and after some API searching, I think problem might be here. Here is the buggy timeline I GUESS:
-- Step1: dotnet runtime GC collected some RefCounted objets, but their finalizer is not called at once.
-- Step2: `OnGodotShuttingDownImpl` manually `Dispose()` all "disposable" objects, but objects in Step1 is not included because they are GC collected and their `WeakReference` should be invalid
-- Step3:  `DEV_ASSERT(_first == nullptr);`
-- Step4: dotnet Finalizer thread finally call Step1 objects' finalizer
+我查看了 `OnGodotShuttingDownImpl`，经过一番 API 检索后，我认为问题可能就在这里。以下是我**猜测**的出错时间线（buggy timeline）：
+- Step1：dotnet runtime 的 GC 回收（collected）了某些 `RefCounted` 对象，但它们的 finalizer 并不会立即被调用。
+- Step2：`OnGodotShuttingDownImpl` 手动 `Dispose()` 了所有 "disposable" 对象，但 Step1 中的对象不在此列——因为它们已被 GC 回收，其 `WeakReference` 应当已失效（invalid）。
+- Step3：`DEV_ASSERT(_first == nullptr);` 触发。
+- Step4：dotnet 的 Finalizer 线程最终才调用 Step1 中那些对象的 finalizer。
 
-So I modified `OnGodotShuttingDownImpl`, manually trigger GC and wait for all finalizer finished at the end of the function, and after that, this problem is not shown yet. (I've tested for about 10 times)
-
+因此我修改了 `OnGodotShuttingDownImpl`，在该函数末尾手动触发 GC 并等待所有 finalizer 执行完毕；在此之后，该问题不再出现（我已测试了大约 10 次）。
 
 ```csharp
 private static void OnGodotShuttingDownImpl()
@@ -260,7 +260,7 @@ private static void OnGodotShuttingDownImpl()
 
     if (isStdoutVerbose)
          GD.Print("Unloading: Finished disposing tracked instances.");
-     
+   
     // MY FIX: waiting for all finalizers finished
     GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced);
     GC.WaitForPendingFinalizers(); 
@@ -268,7 +268,8 @@ private static void OnGodotShuttingDownImpl()
 }
 ```
 
-BTW, by mixed debugging and many testing, I also found that the owner of last one reference is a TypedArray: its `_p->typed.script` is exactly the same address.
+另外，通过mixed debugging和多次测试，我还发现最后一个引用的持有者是一个 `TypedArray`：它的 `_p->typed.script` 与上述地址完全相同。
+
 ```
 &_p->typed.script	0x0000023061165bc0 {type_info={class_name=U"AudioRay" native_base_name={_data=0x0000021041172ea8 {refcount={count={value=...} } ...} } ...} ...}	Ref<Script> *
 this	0x0000023061165bc0 {type_info={class_name=U"AudioRay" native_base_name={_data=0x0000021041172ea8 {refcount={count={value=...} } ...} } ...} ...}	Ref<Script> *

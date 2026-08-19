@@ -5,8 +5,6 @@ title: 'First Post'
 tags: ["Godot", "C#"]
 ---
 
-Testing first post.
-
 测试文章。
 
 ```csharp
