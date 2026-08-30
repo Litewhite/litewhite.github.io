@@ -199,26 +199,104 @@ Thread::id_counter	{value=99 }	SafeNumeric<unsigned __int64>
 
 The remaining question is why `caller_id` is initialized before `id_counter`. I tried initializing `id_counter` with a function return value and setting a breakpoint inside that function. Unfortunately, because compilation optimizations were enabled, the breakpoint had no effect. I then tried disabling compilation optimizations and breaking again, only to find that the bug no longer reproduced. I had to set this question aside for now.
 
+## Further Discovery
+
+After checking and comparing, the root cause turned out to be tracy: as soon as I added tracy to the build, the initialization order broke. Reproduction:
+
+```
+scons platform=windows vsproj=yes dev_build=yes debug_symbols=yes d3d12=yes module_mono_enabled=yes profiler=tracy profiler_path=D:\GameDev\GodotEngine\godot\tracy_src accesskit=no angle=no use
+msbuild godot.sln /p:Configuration=editor /p:Platform=x64
+bin\godot.windows.editor.x86_64.mono.exe --headless --generate-mono-glue modules/mono/glue
+```
+
+With this conclusion, I made the following change — wrapping `id_counter` in a `get_id_counter()` function and setting a breakpoint:
+
+```cpp
+SafeNumeric<uint64_t> Thread::id_counter(1); // The first value after .increment() is 2, hence by default the main thread ID should be 1.
+SafeNumeric<uint64_t> &Thread::get_id_counter() {
+	return Thread::id_counter;
+}
+thread_local Thread::ID Thread::caller_id = Thread::get_id_counter().increment();
+```
+
+The first breakpoint hit showed this call stack:
+
+```
+>	godot.windows.editor.dev.x86_64.mono.exe!Thread::get_id_counter() Line 43	C++
+ 	godot.windows.editor.dev.x86_64.mono.exe!`dynamic initializer for 'Thread::caller_id''()	C++
+ 	[Inline Frame] godot.windows.editor.dev.x86_64.mono.exe!__dyn_tls_init(void *) Line 98	C++
+ 	godot.windows.editor.dev.x86_64.mono.exe!__dyn_tls_on_demand_init() Line 130	C++
+ 	godot.windows.editor.dev.x86_64.mono.exe!tracy::Profiler::Profiler() Line 1489	C++
+ 	godot.windows.editor.dev.x86_64.mono.exe!tracy::`dynamic initializer for 's_profiler''()	C++
+ 	godot.windows.editor.dev.x86_64.mono.exe!_initterm(void(*)() * first, void(*)() * last) Line 16	C++
+ 	godot.windows.editor.dev.x86_64.mono.exe!__scrt_common_main_seh() Line 258	C++
+ 	godot.windows.editor.dev.x86_64.mono.exe!ShimMainCRTStartup(...) Line 74	C
+ 	kernel32.dll!00007ffd9921ccb7()	Unknown
+ 	ntdll.dll!00007ffd9af0ad6c()	Unknown
+```
+
+And at that moment `id_counter` had not been initialized to 1 yet:
+
+```
+-		Thread::id_counter	{value=0 }	SafeNumeric<unsigned __int64>
+```
+
+The call stack showed it came from `tracy::Profiler::Profiler()`, initializing `s_profiler`. Searching in TracyProfiler.cpp, I found:
+
+```cpp
+#ifdef __APPLE__
+#  ifndef TRACY_DELAYED_INIT
+#    define TRACY_DELAYED_INIT
+#  endif
+#else
+#  ifdef __GNUC__
+#    define init_order( val ) __attribute__ ((init_priority(val)))
+#  else
+#    define init_order(x)
+#  endif
+#endif
+
+...
+
+static Profiler init_order(105) s_profiler;
+
+...
+
+Profiler::Profiler()
+{
+	...
+	#ifndef TRACY_DELAYED_INIT
+	#  ifdef _MSC_VER
+		// 3. But these variables need to be initialized in main thread within the .CRT$XCB section. Do it here.
+		s_token_detail = moodycamel::ProducerToken( s_queue );  // <- line 1489
+		s_token = ProducerWrapper { s_queue.get_explicit_producer( s_token_detail ) };
+		s_threadHandle = ThreadHandleWrapper { m_mainThread };
+	#  endif
+	#endif
+	...
+}
+
+```
+
+The failure steps are:
+
+1. `_initterm` runs `s_profiler`'s dynamic initializer → enters `Profiler::Profiler()`.
+2. Line 1489 assigns to `s_token_detail` → first TLS guard hit on the main thread → `__dyn_tls_on_demand_init` → `__dyn_tls_init` runs all TLS initializers of the module in a batch.
+3. Among them, `Thread::caller_id`'s initializer (`get_id_counter().increment()`) is executed.
+4. At this point `Thread::id_counter` (then a plain static member, whose `_initterm` initializer runs later) is still 0 → `caller_id = 1`, which happens to collide with `MAIN_ID`.
+5. Later, `make_main_thread()` in `Main::setup` sees `caller_id == MAIN_ID` and returns early without setting `is_main_thread_assigned`; finally `release_main_thread()` fails on `clear_if_set()` → crash.
+(Without tracy, the main thread touches `caller_id` for the first time in normal code after `main()`, when `_initterm` has already finished and `id_counter` is 1, so `caller_id = 2` — everything works. That's why it only reproduces with tracy enabled.)
+
+I also verified on macOS that this bug does not occur. The reason is that lines 1489–1491 are only compiled on Windows, because MSVC's lazy TLS initialization cannot be controlled with init_order(), so the author had to handle it separately. On macOS these three lines are not executed, so TLS initialization is delayed.
+
 ## Fix
 
 To fix the initialization order, my approach was to declare the variable as `static` inside a function, letting the function call order control the initialization order.
 
 ```cpp
-SafeNumeric<uint64_t>& Thread::get_id_counter() {
+SafeNumeric<uint64_t> &Thread::get_id_counter() {
 	static SafeNumeric<uint64_t> id_counter(1); // The first value after .increment() is 2, hence by default the main thread ID should be 1.
 	return id_counter;
 }
-
-Thread::ID& Thread::_caller_id_slot() {
-	static thread_local ID caller_id = get_id_counter().increment();
-	return caller_id;
-}
-
-static void Thread::set_caller_id(Thread::ID id) {
-	_caller_id_slot() = id;
-}
-
-static Thread::ID Thread::get_caller_id() {
-	return _caller_id_slot();
-}
+thread_local Thread::ID Thread::caller_id = Thread::get_id_counter().increment();
 ```
