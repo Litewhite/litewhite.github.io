@@ -273,7 +273,7 @@ Profiler::Profiler()
 5. 后续 Main::setup 里 make_main_thread() 发现 caller_id == MAIN_ID 直接 return，没 set is_main_thread_assigned；最后release_main_thread() 的 clear_if_set() 失败 → crash。
 （没有 tracy 时，主线程第一次碰 caller_id 在 main() 之后的正常代码里，那时 _initterm 已全部跑完，id_counter 已是 1，caller_id = 2，一切正常——所以只有开 tracy 才复现。）
 
-另外，我也测试了mac版本，不会有这个bug，原因是1489~1491这三行只在windows下编译，因为MSVC的TLS惰性初始化无法用 init_order()控制，作者只能单独处理。在mac上由于不会跑1489~1491这三行，所以TLS初始化延后了。
+另外，我也测试了mac版本，不会有这个bug，原因是1489-1491这三行只在windows下编译，因为MSVC的TLS惰性初始化无法用 init_order()控制，作者只能单独处理。在mac上由于不会跑1489-1491这三行，所以TLS初始化延后了。
 
 ## 修复
 
